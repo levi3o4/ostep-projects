@@ -3,8 +3,7 @@
 
 int unzipOneFile (char* fileName);
 int scanText (FILE* file);
-int printContents (char* repetitions, char* character);
-int binaryToDecimal (char* binaryNum, int size);
+int printContents (char repetitions, char character);
 
 int main (int argc, char *argv[]) {
     
@@ -39,54 +38,26 @@ int unzipOneFile (char* fileName) {
 
 int scanText (FILE* text) {
 
-    char repetitions[32];
-    char byte[8];
+    int repetitions;
+    char character;
     
-    while ((fscanf(text, "%s", byte)) != EOF) {
+    while ((fread(&repetitions, 4, 1, text)) == 1) {
         
-        for(int i = 0; i < 4; i++) {
-            
-            for (int j = 0; j < 8; j++) {
-                
-                *(repetitions + (i * 8) + j) = *(byte + j);
-                
-            }
-            
-            if ((fscanf(text, "%s", byte)) == EOF) {
+        if ((fread(&character, 1, 1, text)) != 1) {
                 exit(2);
-            }
         }
-        *(repetitions + 32) = '\0';
         
-        printContents(repetitions, byte);
+        printContents(repetitions, character);
     }
     
     puts("");
 }
 
-int printContents (char* repetitions, char* character) {
-
-    char intRepetitions = binaryToDecimal(repetitions, 32);
-    char intCharacter = binaryToDecimal(character, 8);
+int printContents (char repetitions, char character) {
     
-    for (int i = 0; i < intRepetitions; i++) {
-        printf("%c", intCharacter);
+    for (int i = 0; i < repetitions; i++) {
+        printf("%c", character);
     }
     
     return 0;
-}
-
-int binaryToDecimal (char* binaryNum, int size) {
-
-    int numArray[size];
-
-    int decimal = 0;
-    
-    for (int i = 0; i < size; i++) {
-    
-        decimal *= 2;
-        decimal += (binaryNum[i] % 2);
-    }
-    
-    return decimal;
 }

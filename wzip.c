@@ -2,7 +2,7 @@
 #include <stdlib.h>
 
 int zipOneFile (char* fileName);
-int scanText (FILE* file);
+int scanText (FILE* text);
 int printEntry (int repetitions, char character);
 
 int main (int argc, char *argv[]) {
@@ -66,35 +66,8 @@ int scanText (FILE* text) {
 
 int printEntry (int repetitions, char character) {
     
-    int repBin[32];
-    
-    for (int i = 31; i >= 0; i--) {
-        repBin[i] = (repetitions % 2);
-        repetitions >>= 1;
-    }
-    
-    for (int i = 0; i < 32; i++) {
-        
-        printf("%d", *(repBin + i));
-        
-        if (i % 8 == 7) {
-            printf("%s", " ");
-        }
-    }
-    
-    int charBin[8];    
-    
-    for (int i = 7; i >= 0; i--) {
-        charBin[i] = (character % 2);
-        character >>= 1;
-    }
-    
-    for (int i = 0; i < 8; i++) {
-        
-        printf("%d", *(charBin + i));
-    }
-    
-    puts("");
-    
+    fwrite(&repetitions, 4, 1, stdout);
+    fwrite(&character, 1, 1, stdout);
+
     return 0;
 }
