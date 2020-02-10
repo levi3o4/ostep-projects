@@ -1,0 +1,114 @@
+
+#include <stdio.h>
+#include <stdlib.h>
+#define SETTINGS_NUM 15
+
+char* settingLabels[SETTINGS_NUM] = {"SEED", "INIT_TIME", "FIN_TIME", "ARRIVE_MIN", "ARRIVE_MAX", 
+                      "QUIT_PROB", "CPU_MIN", "CPU_MAX", "DISK1_MIN", "DISK1_MAX", 
+                      "DISK2_MIN", "DISK2_MAX", "NETWORK_MIN", "NETWORK_MAX", "NETWORK_PROB"};
+
+float settings[SETTINGS_NUM];
+
+typedef struct LINK {
+    int num;
+    struct LINK* next;
+} Process;
+
+typedef struct QUEUE {
+    Process* head;
+    Process* tail;
+    int length;
+} Queue;
+
+enum event {EXAMPLE};
+
+
+
+int getSettings(char* settingsFileName);
+int readIn (FILE *file);
+int validSetting (FILE *file, int index);
+int compare (char* label, int index);
+int setSetting (FILE *file, int index);
+
+int main(int argc, char* argv[]) {
+    
+    getSettings(argv[1]);
+    
+    for (int i = 0; i < SETTINGS_NUM; i++) {
+        printf("%f\n", settings[i]);
+    }
+    
+    //initializeSystems();
+    //runSimulation();
+}
+
+int getSettings(char* settingsFileName) {
+    
+    FILE *file = fopen(settingsFileName, "r"); 
+    
+    if (file == NULL) {
+        printf("cannot open file\n");
+        exit(1); 
+    }
+    
+    readIn(file);
+    
+    fclose(file);
+}
+
+int readIn (FILE *file) {
+    
+    for (int i = 0; i < SETTINGS_NUM; i++) {
+        
+        if (validSetting(file, i)) {
+            setSetting(file, i);
+        
+        } else {
+            puts("File format compatibility issue.");
+            exit(2);
+        }
+    }
+    
+    return 0;
+}
+
+int validSetting (FILE *file, int index) {
+    
+    char label[20];
+    float value;
+    
+    fscanf(file, "%s", label);
+    
+    return compare(label, index);
+}
+
+int compare (char* label, int index) {
+    
+    int offset = 0;
+    char fileLabelChar;
+    char arrayLabelChar;
+    
+    for (; (fileLabelChar = *(label + offset)) != '\0' && 
+            (arrayLabelChar = *(*(settingLabels + index) + offset)) != '\0'; offset++) {
+    
+        if(fileLabelChar != arrayLabelChar) {
+            return 0;
+        }
+    }
+    
+    if ((fileLabelChar = *(label + offset)) != '\0' || 
+            (arrayLabelChar = *(*(settingLabels + index) + offset)) != '\0') {
+        return 0;
+    }
+    
+    return 1;
+}
+
+int setSetting (FILE *file, int index) {
+    
+    float value;
+    
+    fscanf(file, "%f", &value);
+    
+    settings[index] = value;
+}
