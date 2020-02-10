@@ -1,0 +1,420 @@
+/*TO DO:
+ * Streamline the priority queue-related processes
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#define SETTINGS_NUM 15
+#define CPU 0
+#define DISC_1 1
+#define DISC_2 2
+#define NETWORK 3
+
+char* settingLabels[SETTINGS_NUM] = {"SEED", "INIT_TIME", "FIN_TIME", "ARRIVE_MIN", "ARRIVE_MAX", 
+                      "QUIT_PROB", "CPU_MIN", "CPU_MAX", "DISK1_MIN", "DISK1_MAX", 
+                      "DISK2_MIN", "DISK2_MAX", "NETWORK_MIN", "NETWORK_MAX", "NETWORK_PROB"};
+                      
+typedef enum SETTING_INDEX {
+    SEED, 
+    INIT_TIME, 
+    FIN_TIME, 
+    ARRIVE_MIN, 
+    ARRIVE_MAX, 
+    QUIT_PROB, 
+    CPU_MIN, 
+    CPU_MAX, 
+    DISK1_MIN, 
+    DISK1_MAX, 
+    DISK2_MIN, 
+    DISK2_MAX, 
+    NETWORK_MIN, 
+    NETWORK_MAX, 
+    NETWORK_PROB
+} SettingIndex;
+
+float settings[SETTINGS_NUM];
+
+typedef struct LINK {
+    int num;
+    struct LINK* next;
+} Process;
+
+typedef struct QUEUE {
+    Process* device;
+    Process* head;
+    Process* tail;
+} Component;
+
+Component component[4];
+
+typedef enum EVENT_TYPE {
+    ARRIVAL, 
+    CPU_FINISH, 
+    DISC_1_FINISH, 
+    DISC_2_FINISH, 
+    NETWORK_FINISH, 
+    SIMULATION_END
+} EventType;
+
+typedef struct EVENT {
+    int eventTime;
+    EventType type;
+    int jobNum;
+} Event;
+
+typedef struct PRIORITY_QUEUE {
+    Event* array;
+    int tailIndex;
+} EventQueue;
+
+EventQueue eventQueue;
+
+int newJobNum = 1;
+
+int getSettings(char* settingsFileName);
+int readIn (FILE *file);
+int validSetting (FILE *file, int index);
+int compare (char* label, int index);
+int setSetting (FILE *file, int index);
+int initializeSystems ();
+int initializeComponent (int index);
+int intializeEventQueue ();
+int enlargeEventQueue (int index); //REMOVE PARAMETER LATER;
+int eventQueueInsert (int eventTime, EventType type, int jobNum);
+int swapDecider (int parentIndex, int childIndex);
+int swap(int parentIndex, int childIndex);
+Event eventQueuePull ();
+int twoChildDecider (int parentIndex);
+int moveTo (Component component, Process process);
+int enqueue (Component component, Process process);
+int dequeue (Component component);
+
+int main(int argc, char* argv[]) {
+    
+    getSettings(argv[1]);
+    
+    //DELETE LATER
+    for (int i = 0; i < SETTINGS_NUM; i++) {
+        printf("%f\n", settings[i]);
+    }
+    
+    initializeSystems();
+    
+    eventQueueInsert (134, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (119, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (128, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (172, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (69, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (31, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (42, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (1, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (0, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (13, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (47, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (44, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (40, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    puts("All done");
+    
+    for (int i = 0; i < 13; i++) {
+        
+        Event temp = eventQueuePull();
+        printf("%d\n", temp.eventTime);
+    }
+    
+    //runSimulation();
+    exit(0);
+}
+
+int getSettings(char* settingsFileName) {
+    
+    FILE *file = fopen(settingsFileName, "r"); 
+    
+    if (file == NULL) {
+        printf("cannot open file\n");
+        exit(1); 
+    }
+    
+    readIn(file);
+    
+    fclose(file);
+    
+    return 0;
+}
+
+int readIn (FILE *file) {
+    
+    for (int i = 0; i < SETTINGS_NUM; i++) {
+        
+        if (validSetting(file, i)) {
+            setSetting(file, i);
+        
+        } else {
+            puts("File format compatibility issue.");
+            exit(2);
+        }
+    }
+    
+    return 0;
+}
+
+int validSetting (FILE *file, int index) {
+    
+    char label[20];
+    float value;
+    
+    fscanf(file, "%s", label);
+    
+    return compare(label, index);
+}
+
+int compare (char* label, int index) {
+    
+    int offset = 0;
+    char fileLabelChar;
+    char arrayLabelChar;
+    
+    for (; (fileLabelChar = *(label + offset)) != '\0' && 
+            (arrayLabelChar = *(*(settingLabels + index) + offset)) != '\0'; offset++) {
+    
+        if(fileLabelChar != arrayLabelChar) {
+            return 0;
+        }
+    }
+    
+    if ((fileLabelChar = *(label + offset)) != '\0' || 
+            (arrayLabelChar = *(*(settingLabels + index) + offset)) != '\0') {
+        return 0;
+    }
+    
+    return 1;
+}
+
+int setSetting (FILE *file, int index) {
+    
+    float value;
+    
+    fscanf(file, "%f", &value);
+    
+    settings[index] = value;
+    
+    return 0;
+}
+
+int initializeSystems () {
+    
+    for (int i = 0; i < 4; i++) {
+        initializeComponent(i);
+    }
+    
+    intializeEventQueue();
+    
+    return 0;
+}
+
+int initializeComponent (int index) {
+    
+    component[index].device = NULL;
+    component[index].head = NULL;
+    component[index].tail = NULL;
+    
+    return 0;
+}
+
+int intializeEventQueue () {
+    
+    eventQueue.array = (Event*) malloc(2000 * sizeof(Event));
+    eventQueue.tailIndex = 0;
+    
+    return 0;
+}
+
+int enlargeEventQueue (int index) {//REMOVE PARAMETER LATER
+    
+    puts("ENLARGE ENTERED");
+    
+    printf("as %d\n", eventQueue.array[index].eventTime);
+    
+    eventQueue.array = (Event*) realloc(eventQueue.array, 3 * sizeof(eventQueue.array));
+    
+    printf("as %d\n", eventQueue.array[index].eventTime);
+    
+    return 0;
+}
+
+int eventQueueInsert (int eventTime, EventType type, int jobNum) {
+    
+    printf("inserted %d\n", eventTime);
+    
+    Event event = {eventTime, type, jobNum};
+    
+    eventQueue.array[eventQueue.tailIndex] = event;
+    
+    int currentIndex = eventQueue.tailIndex;
+    int indexCopy = currentIndex; //DELETE LATER
+    
+    int done = 0;
+    
+    while (!done && currentIndex > 0) {
+        
+        printf("as %d\n", eventQueue.array[currentIndex].eventTime);
+        
+        done = swapDecider((currentIndex - 1) / 2, currentIndex);
+        
+        if (!done) {
+            
+            indexCopy = (currentIndex - 1) / 2;
+            printf("as %d\n", eventQueue.array[(currentIndex - 1) / 2].eventTime);
+        } else {
+            
+            indexCopy = currentIndex;
+            printf("as %d\n", eventQueue.array[currentIndex].eventTime);
+        }
+        
+        currentIndex = (currentIndex - 1) / 2;
+    }
+    
+    eventQueue.tailIndex++;
+    
+    printf("as %d\n", eventQueue.array[indexCopy].eventTime);
+    
+    if (eventQueue.tailIndex >= (sizeof(eventQueue.array) / sizeof(Event))) {
+        
+        printf("ENLARGE TRIGGER: %d %d %d\n", sizeof(eventQueue.array), 
+        sizeof(Event), (sizeof(eventQueue.array) / sizeof(Event)));
+        enlargeEventQueue(indexCopy);
+    }
+    
+    printf("FINAL as %d\n", eventQueue.array[indexCopy].eventTime);
+    
+    for (int i = 0; i < eventQueue.tailIndex; i++) {
+        printf("%d ", eventQueue.array[i].eventTime);
+    }
+    puts("");
+    return 0;
+}
+
+int swapDecider (int parentIndex, int childIndex) {
+    
+    printf("as %d\n", eventQueue.array[childIndex].eventTime);
+    
+    if (eventQueue.array[parentIndex].eventTime > eventQueue.array[childIndex].eventTime) {
+        swap(parentIndex, childIndex);
+        return 0;
+    
+    } else {
+        return 1;
+    }
+}
+
+int swap(int parentIndex, int childIndex) {
+ 
+    Event temp = eventQueue.array[parentIndex];
+    eventQueue.array[parentIndex] = eventQueue.array[childIndex];
+    eventQueue.array[childIndex] = temp; 
+    
+    printf("as %d\n", eventQueue.array[parentIndex].eventTime);
+    
+    return 0;
+}
+
+Event eventQueuePull () {
+    
+    Event retval = eventQueue.array[0];
+    
+    eventQueue.array[0] = eventQueue.array[eventQueue.tailIndex--];
+    
+    int currentIndex = 0;
+    
+    int result = 1;
+    
+    while (result) {
+        
+        if ((currentIndex * 2) + 2 < eventQueue.tailIndex) {
+            
+            result = twoChildDecider(currentIndex);
+            currentIndex = (currentIndex * 2) + result;
+        
+        } else if ((currentIndex * 2) + 1 < eventQueue.tailIndex) {
+            
+            result = 1 - swapDecider(currentIndex, (currentIndex * 2) + 1);
+            currentIndex = (currentIndex * 2) + 1;
+            
+        } else {
+            
+            result = 0;
+        }
+    }
+    
+    return retval;
+    
+}
+
+int twoChildDecider (int parentIndex) {
+    
+    int child = 1;
+    
+    int childIndexPre = (parentIndex * 2);
+    
+    if (eventQueue.array[childIndexPre + 1].eventTime > eventQueue.array[childIndexPre + 2].eventTime) {
+        
+        child++;
+    }
+    
+    if (swap(parentIndex, childIndexPre + child)) {
+        return child;
+    
+    } else {
+        return 0;
+    }
+}
+
+int moveTo (Component component, Process process) {
+    
+    if (component.device == NULL) {
+        component.device = &process;
+        
+    } else {
+        enqueue(component, process);
+    }
+    
+    return 0;
+}
+
+int enqueue (Component component, Process process) {
+    
+    if (component.head == NULL) {
+        component.head = &process;
+        component.tail = &process;
+        
+    } else {
+        component.tail->next = &process;
+        component.tail = &process;
+    }
+    
+    return 0;
+}
+
+int dequeue (Component component) {
+    
+    component.device = component.head;
+    component.head = component.head->next;
+    
+    if (component.head == NULL) {
+        component.tail = NULL;
+    }
+    
+    return 0;
+}
