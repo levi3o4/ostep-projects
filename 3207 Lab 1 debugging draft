@@ -1,0 +1,766 @@
+#include <stdio.h>
+#include <stdlib.h>
+#define SETTINGS_NUM 15
+#define CPU 0
+#define DISK_1 1
+#define DISK_2 2
+#define NETWORK 3
+
+char* settingLabels[SETTINGS_NUM] = {"SEED", "INIT_TIME", "FIN_TIME", "ARRIVE_MIN", "ARRIVE_MAX", 
+                      "QUIT_PROB", "CPU_MIN", "CPU_MAX", "DISK1_MIN", "DISK1_MAX", 
+                      "DISK2_MIN", "DISK2_MAX", "NETWORK_MIN", "NETWORK_MAX", "NETWORK_PROB"};
+                      
+typedef enum SETTING_INDEX {
+    SEED, 
+    INIT_TIME, 
+    FIN_TIME, 
+    ARRIVE_MIN, 
+    ARRIVE_MAX, 
+    QUIT_PROB, 
+    CPU_MIN, 
+    CPU_MAX, 
+    DISK1_MIN, 
+    DISK1_MAX, 
+    DISK2_MIN, 
+    DISK2_MAX, 
+    NETWORK_MIN, 
+    NETWORK_MAX, 
+    NETWORK_PROB
+} SettingIndex;
+
+int settings[SETTINGS_NUM];
+
+typedef struct LINK {
+    int num;
+    struct LINK* next;
+} Process;
+
+typedef struct QUEUE {
+    Process* device;
+    Process* head;
+    Process* tail;
+    int length;
+} Component;
+
+Component component[4];
+
+typedef enum EVENT_TYPE {
+    ARRIVAL, 
+    CPU_FINISH, 
+    DISK1_FINISH, 
+    DISK2_FINISH, 
+    NETWORK_FINISH, 
+    SIMULATION_END
+} EventType;
+
+typedef struct EVENT {
+    int eventTime;
+    EventType type;
+    int jobNum;
+} Event;
+
+typedef struct PRIORITY_QUEUE {
+    Event* array;
+    int tailIndex;
+    int arraySize;
+} EventQueue;
+
+EventQueue eventQueue;
+
+int newJobNum = 1;
+int currentTime = 0;
+
+int getSettings(char* settingsFileName);
+int readIn (FILE *file);
+int validSetting (FILE *file, int index);
+int compare (char* label, int index);
+int setSetting (FILE *file, int index);
+int initializeSystems ();
+int initializeComponent (int index);
+int intializeEventQueue ();
+int runSimulation ();
+int enlargeEventQueue (int index); //REMOVE PARAMETER LATER;
+int eventQueueInsert (int eventTime, EventType type, int jobNum);
+int swapDecider (int parentIndex, int childIndex);
+int swap(int parentIndex, int childIndex);
+Event eventQueuePull ();
+int twoChildDecider (int parentIndex);
+int systemArrivalHandler (int jobNum);
+int createNewProcessEvent ();
+int moveTo (int compIndex, Process process);
+int loadProcess (int compIndex, Process process);
+int createFinishingEvent (int compIndex, Process process);
+int componentFinishingEventHandler (EventType type);
+int eventTypeToComponentTranslator(EventType type);
+int transferProcess (int source, int destination);
+int processExit ();
+int mostAvailableDisk ();
+int cpuFinishingHandler ();
+int getNewEventTime(int compIndex);
+EventType getNewEventType(int compIndex);
+int enqueue (int compIndex, Process process);
+int dequeue (int compIndex);
+
+int main(int argc, char* argv[]) {
+    
+    getSettings(argv[1]);
+    
+    initializeSystems();
+    /*
+    eventQueueInsert (134, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (119, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (128, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (172, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (69, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (31, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (42, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (1, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (0, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (13, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (47, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (44, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    eventQueueInsert (40, 0, 0);
+    printf("%d\n", eventQueue.tailIndex);
+    puts("All done");
+    
+    for (int i = 0; i < 13; i++) {
+        
+        Event temp = eventQueuePull();
+        printf("%d\n", temp.eventTime);
+    }
+    */
+    
+    SettingIndex seed = SEED;
+    srand(seed);
+    runSimulation();
+    
+    exit(0);
+}
+
+int getSettings(char* settingsFileName) {
+    
+    FILE *file = fopen(settingsFileName, "r"); 
+    
+    if (file == NULL) {
+        printf("cannot open file\n");
+        exit(1); 
+    }
+    
+    readIn(file);
+    
+    fclose(file);
+    
+    return 0;
+}
+
+int readIn (FILE *file) {
+    
+    for (int i = 0; i < SETTINGS_NUM; i++) {
+        
+        if (validSetting(file, i)) {
+            setSetting(file, i);
+        
+        } else {
+            puts("File format compatibility issue.");
+            exit(2);
+        }
+    }
+    
+    return 0;
+}
+
+int validSetting (FILE *file, int index) {
+    
+    char label[20];
+    int value;
+    
+    fscanf(file, "%s", label);
+    
+    return compare(label, index);
+}
+
+int compare (char* label, int index) {
+    
+    int offset = 0;
+    char fileLabelChar;
+    char arrayLabelChar;
+    
+    for (; (fileLabelChar = *(label + offset)) != '\0' && 
+            (arrayLabelChar = *(*(settingLabels + index) + offset)) != '\0'; offset++) {
+    
+        if(fileLabelChar != arrayLabelChar) {
+            return 0;
+        }
+    }
+    
+    if ((fileLabelChar = *(label + offset)) != '\0' || 
+            (arrayLabelChar = *(*(settingLabels + index) + offset)) != '\0') {
+        return 0;
+    }
+    
+    return 1;
+}
+
+int setSetting (FILE *file, int index) {
+    
+    int value;
+    
+    fscanf(file, "%d", &value);
+    
+    settings[index] = value;
+    
+    return 0;
+}
+
+int initializeSystems () {
+    
+    for (int i = 0; i < 4; i++) {
+        initializeComponent(i);
+    }
+    
+    intializeEventQueue();
+    
+    return 0;
+}
+
+int initializeComponent (int index) {
+    
+    component[index].device = NULL;
+    component[index].head = NULL;
+    component[index].tail = NULL;
+    component[index].length = 0;
+    
+    return 0;
+}
+
+int intializeEventQueue () {
+    
+    eventQueue.arraySize = 2000;
+    eventQueue.array = (Event*) malloc(eventQueue.arraySize * sizeof(Event));
+    eventQueue.tailIndex = 0;
+    
+    EventType event = ARRIVAL;
+    eventQueueInsert(0, event, newJobNum++);
+    
+    event = SIMULATION_END;
+    SettingIndex finTime = FIN_TIME;
+    eventQueueInsert(settings[finTime], event, -1);
+    
+    /*
+    typedef struct EVENT {
+    int eventTime;
+    EventType type;
+    int jobNum;
+    } Event;
+    */
+
+    
+    return 0;
+}
+
+int runSimulation() {
+    
+    puts("runSimulation is about to call eventQueuePull before while loop");
+    Event current = eventQueuePull();
+    puts("eventQueuePull finished from runSimulation");
+    
+    currentTime = current.eventTime;
+    //CURRENT EVENT PRINT
+    //printf("%d %d %d\n", current.eventTime, current.type, current.jobNum);
+    
+    while (current.type != SIMULATION_END) {
+        puts("runSimulation while loop reached");
+        
+        if (current.type == ARRIVAL) {
+            puts("runSimulation about to call systemArrivalHandler(current.jobNum)");
+            systemArrivalHandler(current.jobNum);
+            puts("systemArrivalHandler(current.jobNum) finished from runSimulation()");
+            
+        } else {
+            puts("runSimulation about to call componentFinishingEventHandler(current.type)");
+            componentFinishingEventHandler(current.type);
+            puts("componentFinishingEventHandler(current.type) finished from runSimulation()");;
+        }
+        puts("runSimulation about to call eventQueuePull to update while loop");
+        current = eventQueuePull();
+        puts("eventQueuePull finished from runSimulation\n");
+    }
+}
+
+int enlargeEventQueue (int index) {//REMOVE PARAMETER LATER
+    
+    puts("ENLARGE ENTERED");
+    
+    //printf("as %d\n", eventQueue.array[index].eventTime);
+    
+    eventQueue.arraySize *= 3;
+    eventQueue.array = (Event*) realloc(eventQueue.array, 3 * eventQueue.arraySize);
+    
+    //printf("as %d\n", eventQueue.array[index].eventTime);
+    
+    return 0;
+}
+
+int eventQueueInsert (int eventTime, EventType type, int jobNum) {
+    
+    //printf("inserted %d\n", eventTime);
+    
+    Event event = {eventTime, type, jobNum};
+    
+    eventQueue.array[eventQueue.tailIndex] = event;
+    
+    int currentIndex = eventQueue.tailIndex;
+    int indexCopy = currentIndex; //DELETE LATER
+    
+    int done = 0;
+    
+    while (!done && currentIndex > 0) {
+        
+        //printf("as %d\n", eventQueue.array[currentIndex].eventTime);
+        
+        done = swapDecider((currentIndex - 1) / 2, currentIndex);
+        
+        if (!done) {
+            
+            indexCopy = (currentIndex - 1) / 2;
+            //printf("as %d\n", eventQueue.array[(currentIndex - 1) / 2].eventTime);
+        } else {
+            
+            indexCopy = currentIndex;
+            //printf("as %d\n", eventQueue.array[currentIndex].eventTime);
+        }
+        
+        currentIndex = (currentIndex - 1) / 2;
+    }
+    
+    eventQueue.tailIndex++;
+    
+    //printf("as %d\n", eventQueue.array[indexCopy].eventTime);
+    
+    if (eventQueue.tailIndex >= eventQueue.arraySize) {
+        
+        //printf("ENLARGE TRIGGER: %d %d %d\n", sizeof(eventQueue.array), 
+        //sizeof(Event), (sizeof(eventQueue.array) / sizeof(Event)));
+        enlargeEventQueue(indexCopy);
+    }
+    
+    //printf("FINAL as %d\n", eventQueue.array[indexCopy].eventTime);
+    /*
+    for (int i = 0; i < eventQueue.tailIndex; i++) {
+        printf("%d ", eventQueue.array[i].eventTime);
+    }
+    
+    puts("");*/
+    return 0;
+}
+
+int swapDecider (int parentIndex, int childIndex) {
+    
+    //printf("as %d\n", eventQueue.array[childIndex].eventTime);
+    
+    if (eventQueue.array[parentIndex].eventTime > eventQueue.array[childIndex].eventTime) {
+        swap(parentIndex, childIndex);
+        return 0;
+    
+    } else {
+        return 1;
+    }
+}
+
+int swap(int parentIndex, int childIndex) {
+ 
+    Event temp = eventQueue.array[parentIndex];
+    eventQueue.array[parentIndex] = eventQueue.array[childIndex];
+    eventQueue.array[childIndex] = temp; 
+    
+    //printf("as %d\n", eventQueue.array[parentIndex].eventTime);
+    
+    return 0;
+}
+
+Event eventQueuePull () {
+    /*
+    for (int i = 0; i < eventQueue.tailIndex; i++) {
+        printf("%d ", eventQueue.array[i].eventTime);
+    }
+    
+    puts("");
+    */
+    Event retval = eventQueue.array[0];
+    
+    eventQueue.array[0] = eventQueue.array[--eventQueue.tailIndex];
+    /*
+    for (int i = 0; i < eventQueue.tailIndex; i++) {
+        printf("%d ", eventQueue.array[i].eventTime);
+    }
+    
+    puts("");
+    */
+    int currentIndex = 0;
+    
+    int result = 1;
+    
+    while (result) {
+        
+        if ((currentIndex * 2) + 2 < eventQueue.tailIndex) {
+            
+            result = twoChildDecider(currentIndex);
+            currentIndex = (currentIndex * 2) + result;
+        
+        } else if ((currentIndex * 2) + 1 < eventQueue.tailIndex) {
+            
+            result = 1 - swapDecider(currentIndex, (currentIndex * 2) + 1);
+            currentIndex = (currentIndex * 2) + 1;
+            
+        } else {
+            
+            result = 0;
+        }
+        /*
+        for (int i = 0; i < eventQueue.tailIndex; i++) {
+            printf("%d ", eventQueue.array[i].eventTime);
+        }
+    
+        puts("");
+        */
+    }
+    /*
+    for (int i = 0; i < eventQueue.tailIndex; i++) {
+        printf("%d ", eventQueue.array[i].eventTime);
+    }
+    puts("");
+    */
+    return retval;
+}
+
+int twoChildDecider (int parentIndex) {
+    
+    int child = 1;
+    
+    int childIndexPre = (parentIndex * 2);
+    
+    //printf("%d %d %d\n", eventQueue.array[parentIndex].eventTime, eventQueue.array[childIndexPre + 1].eventTime, 
+    //eventQueue.array[childIndexPre + 2].eventTime);
+    
+    if (eventQueue.array[childIndexPre + 1].eventTime > eventQueue.array[childIndexPre + 2].eventTime) {
+        
+        child++;
+    }
+    
+    if (!swapDecider(parentIndex, (childIndexPre + child))) {
+        return child;
+    
+    } else {
+        return 0;
+    }
+}
+
+int systemArrivalHandler (int jobNum) {
+    puts("systemArrivalHandler reached");
+    puts("systemArrivalHandler about create new process");
+    Process process = {jobNum, NULL};
+    puts("New process created");
+    puts("systemArrivalHandler about to call moveTo(CPU, process)");
+    moveTo(CPU, process);
+    puts("moveTo(CPU, process), finished from systemArrivalHandler");
+    //puts();
+    createNewProcessEvent();
+    
+    return 0;
+}
+
+int createNewProcessEvent () {
+    
+    int min = settings[ARRIVE_MIN];
+    int max = settings[ARRIVE_MAX];
+    
+    int newEventTime = currentTime + min + (rand() % (max - min));
+    EventType arrival = ARRIVAL;
+    
+    eventQueueInsert(newEventTime, arrival, newJobNum++);
+    //int eventTime, EventType type, int jobNum
+    
+    return 0;
+}
+
+int moveTo (int compIndex, Process process) {
+    puts("moveTo reached");
+    if (component[compIndex].device == NULL) {
+        puts("moveTo about to loadProcess(compIndex, process)");
+        loadProcess(compIndex, process);
+        puts("loadProcess(compIndex, process) finished from moveTo");
+        
+    } else {
+        puts("moveTo about to call enqueue(compIndex, process)");
+        enqueue(compIndex, process);
+        puts("enqueue(compIndex, process) finished from moveTo");
+    }
+    
+    return 0;
+}
+
+int loadProcess (int compIndex, Process process) {
+    puts("loadProcess reached");
+    component[compIndex].device = &process;
+    //puts("process loaded into device");
+    createFinishingEvent(compIndex, process);
+    //puts("finishing event created");
+    return 0;
+}
+
+int createFinishingEvent (int compIndex, Process process) {
+    //puts("createFinishingEventReached");
+    int newEventTime = getNewEventTime(compIndex);
+    //puts("new Event Time gotten");
+    EventType newEventType = getNewEventType(compIndex);
+    //puts("new event type gotten");
+    eventQueueInsert(newEventTime, newEventType, process.num);
+    //puts("new element inserted");
+    //int eventTime, EventType type, int jobNum
+    
+    return 0;
+}
+
+int componentFinishingEventHandler (EventType type) {
+    puts("componentFinishingEventHandler reached");
+    puts("componentFinishingEventHandler about to call eventTypeToComponentTranslator(type)");
+    int compIndex = eventTypeToComponentTranslator(type);
+    puts("eventTypeToComponentTranslator(type) finished from componentFinishingEventHandler");
+    if (compIndex == CPU) {
+        puts("componentFinishingEventHandler about to call cpuFinishingHandler");
+        cpuFinishingHandler();
+        puts("cpuFinishingHandler finished from componentFinishingEventHandler");
+    
+    } else {
+        puts("componentFinishingEventHandler about to call transferProcess(compIndex, CPU)");
+        transferProcess(compIndex, CPU);
+        puts("transferProcess(compIndex, CPU) finished from componentFinishingEventHandler");
+    }
+    
+    return 0;
+    
+    //dequeue(component[compIndex]);
+    
+}
+
+int eventTypeToComponentTranslator(EventType type) {
+    
+    int compIndex;
+    
+    switch(type) {
+
+        case CPU_FINISH:
+            compIndex = CPU;
+            break;
+	    
+	    case DISK1_FINISH:
+            compIndex = DISK_1;
+            break;
+	
+	    case DISK2_FINISH:
+            compIndex = DISK_2;
+            break;
+            
+        case NETWORK_FINISH:
+            compIndex = NETWORK;
+            break;
+    }
+    
+    return compIndex;
+}
+
+int transferProcess (int source, int destination) {
+    puts("tranferProcess reached");
+    puts("transferProcess about to call moveTo(destination, *component[source].device)");
+    moveTo(destination, *component[source].device);
+    puts("moveTo(destination, *component[source].device) finished from transferProcess");
+    
+    //printf("Sounrce is %d\n", source);
+    
+    //printf("component[source].head is NULL? %d\n", component[source].head == NULL);
+    if (component[source].head != NULL) {
+        puts("transferProcess about to call loadProcess(source, *component[source].head)");
+        loadProcess(source, *component[source].head);
+        puts("loadProcess(source, *component[source].head) finished from transferProcess");
+        dequeue(source);
+    }
+    return 0;
+}
+
+int cpuFinishingHandler () {
+    puts("cpuFinishingHandler reached");
+    SettingIndex quitProb = QUIT_PROB;
+    SettingIndex networkProb = NETWORK_PROB;
+    puts("settings set");
+    if (rand() % 100 < settings[quitProb]) {
+        puts("cpuFinishingHandler about to call processExit");
+        processExit();
+        puts("processExit finished from cpuFinishingHandler");
+    
+    } else if (rand() % 100 < settings[networkProb]) {
+        puts("cpuFinishingHandler about to call(transferProcess(CPU, NETWORK))");
+        transferProcess(CPU, NETWORK);
+        puts("transferProcess(CPU, NETWORK) finished from cpuFinishingHandler ");
+        
+    } else {
+        puts("cpuFinishingHandler about to call transferProcess(CPU, mostAvailableDisk)");
+        transferProcess(CPU, mostAvailableDisk());
+        puts("transferProcess(CPU, mostAvailableDisk) finished from cpuFinishingHandler");
+    }
+    
+    return 0;
+}
+
+int mostAvailableDisk () {
+        
+    if (component[DISK_1].length < component[DISK_2].length) {
+        return DISK_1;
+    } 
+    
+    if (component[DISK_1].length > component[DISK_2].length) {
+        return DISK_2;
+    } 
+    
+    int coin = rand() % 2;
+            
+    if (coin) {
+        return DISK_1;
+    } 
+    
+    return DISK_2;
+}
+
+int processExit () {
+    
+    loadProcess(CPU, *component[CPU].head);
+    dequeue(CPU);
+    
+    return 0;
+}
+
+int getNewEventTime(int compIndex) {
+    //puts("getNewEventTime reached");
+    SettingIndex siMin;
+    SettingIndex siMax;
+    
+    switch(compIndex) {
+
+        case CPU:
+            siMin = CPU_MIN;
+            siMax = CPU_MAX;
+            break;
+	    
+	    case DISK_1:
+            siMin = DISK1_MIN;
+            siMax = DISK1_MAX;
+            break;
+	
+	    case DISK_2:
+            siMin = DISK2_MIN;
+            siMax = DISK2_MAX;
+            break;
+	
+	    case NETWORK:
+            siMin = NETWORK_MIN;
+            siMax = NETWORK_MAX;
+            break;
+            
+        //default:
+        //    siMin = ARRIVE_MIN;
+        //    siMax = ARRIVE_MAX;
+    }
+    
+    //puts("switch passed");
+    
+    int min = settings[siMin];
+    int max = settings[siMax];
+    
+    //puts("min and max set");
+    
+    return currentTime + min + (rand() % (max - min));
+}
+
+EventType getNewEventType(int compIndex) {
+    
+    EventType type;
+    
+    switch(compIndex) {
+
+        case CPU:
+            type = CPU_FINISH;
+            break;
+	    
+	    case DISK_1:
+            type = DISK1_FINISH;
+            break;
+	
+	    case DISK_2:
+            type = DISK2_FINISH;
+            break;
+	
+	    case NETWORK:
+            type = NETWORK_FINISH;
+            break;
+    }
+    
+    return type;
+}
+
+int enqueue (int compIndex, Process process) {
+    
+    if (component[compIndex].head == NULL) {
+        component[compIndex].head = &process;
+        component[compIndex].tail = &process;
+        
+    } else {
+        component[compIndex].tail->next = &process;
+        component[compIndex].tail = &process;
+    }
+    
+    component[compIndex].length++;
+    
+    return 0;
+}
+
+int dequeue (int compIndex) {
+    
+    //loadProcess(compIndex, *component[compIndex].head);
+    
+    /* CODE FROM loadProcess
+    component[compIndex].device = &process;
+    createFinishingEvent(compIndex, process);
+    */
+    
+    //component[compIndex].device = component[compIndex].head;
+    component[compIndex].head = component[compIndex].head->next;
+    
+    if (component[compIndex].head == NULL) {
+        component[compIndex].tail = NULL;
+    }
+    
+    component[compIndex].length--;
+    
+    return 0;
+}
+/*
+typedef enum EVENT_TYPE {
+    ARRIVAL, 
+    CPU_FINISH, 
+    DISK_1_FINISH, 
+    DISK_2_FINISH, 
+    NETWORK_FINISH, 
+    SIMULATION_END
+} EventType;
+*/
