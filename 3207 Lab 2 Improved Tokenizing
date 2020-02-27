@@ -1,0 +1,121 @@
+
+#include <stdio.h>
+#include <stdlib.h>
+
+char** parseLine (FILE* stream);
+char** splitLine (char* line);
+int countTokens (char* line);
+void fillStringArray(char* line, char** array, int size);
+void copyToken(char* string1, int* offset, char** string2);
+int tokenLength (char* string, int offset);
+
+int main()
+{
+    
+    FILE* stream = fopen("test.txt", "r");
+    stream = stdin;
+    
+    char** array = parseLine(stream);
+    
+    for (int offset = 0; *(array + offset) != NULL; offset++) {
+        printf("%s\n", *(array + offset));
+    }
+    
+}
+
+char** parseLine (FILE* stream) {
+
+    char* line = NULL;
+    size_t num = 0;
+    
+    if(getline(&line, &num, stream) != -1) {
+        
+        return splitLine(line);
+    
+    } else {
+        puts("Error - unable to read line from unput stream.");
+    }
+
+    exit(1);
+
+}
+
+char** splitLine (char* line) {
+    
+    while(*line == ' ') {
+        line++;
+    }
+    
+    int numTokens = countTokens(line);
+
+    char** array = (char**) malloc((numTokens + 1) * (sizeof(char*)));
+    
+    fillStringArray(line, array, numTokens);
+    
+    return array;
+}
+
+int countTokens (char* line) {
+    
+    if (*line == '\0') {
+        return 0;
+    }
+    
+    int count = 1;
+    
+    for (int offset = 0; *(line + offset) != '\0'; offset++) {
+
+        if (*(line + offset) == ' ' && *(line + offset - 1) != ' ') {
+            count++;
+        }
+    }
+    
+    return count;
+}
+
+void fillStringArray(char* line, char** array, int size) {
+
+    int lineOffset = 0;
+
+    for (int arrayOffset = 0; arrayOffset < size; arrayOffset++) {
+        
+        copyToken(line, &lineOffset, (array + arrayOffset));
+        
+        while (*(line + lineOffset) == ' ') {
+            lineOffset++;
+        }
+    }
+    
+    *(array + size) = NULL;
+    
+    return;
+}
+
+void copyToken(char* string1, int* string1OffsetPtr, char** string2) {
+    
+    int length = tokenLength(string1, *string1OffsetPtr);
+
+    *string2 = (char*) malloc((length + 1) * sizeof(char));
+
+    int string2Offset = 0;
+    
+    for (; string2Offset < length; (*string1OffsetPtr)++, string2Offset++) {
+        
+        *(*string2 + string2Offset) = *(string1 + *string1OffsetPtr);
+    }
+    
+    *(*string2 + length) = '\0';
+
+    return;
+}
+
+int tokenLength (char* string, int offset) {
+    
+    int count = 0;
+
+    for (; *(string + offset) != ' ' && *(string + offset) != '\0'; offset++, count++) {
+        ;
+    }
+
+    return count;
+}
