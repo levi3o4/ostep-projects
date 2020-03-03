@@ -1,0 +1,162 @@
+
+#include <stdio.h>
+#include <stdlib.h>
+
+char** parseLine (FILE* stream);
+char** splitLine (char* line);
+int countTokens (char* line);
+void fastForewardThroughChars (char** ptr);
+void fastForewardThroughSpaces (char** ptr);
+void fillStringArray (char* line, char** array, int size);
+void copyTokenIntoArray (char** s1Ptr, char** s2Ptr);
+void copyToken (char* s1, char** s2Ptr);
+int tokenLength (char* string);
+int stringMatch (char* string1, char* string2);
+
+int main() {
+    
+     //PARSE TESTING
+    FILE* stream = fopen("test.txt", "r");
+    //stream = stdin;
+    
+    char** array = parseLine(stream);
+    
+    for (int offset = 0; *(array + offset) != NULL; offset++) {
+        printf("%s.\n", *(array + offset));
+    }
+    
+    
+    /* //STRING MATCH TESTING
+    char* Help = "Help";
+    
+    printf("%d", stringMatch("Help", Help));
+    */
+    exit(0);
+}
+
+char** parseLine (FILE* stream) {
+
+    char* line = NULL;
+    size_t num = 0;
+    
+    if(getline(&line, &num, stream) != -1) {
+        
+        return splitLine(line);
+    
+    } else {
+        fprintf(stderr, "Error - unable to read line from unput stream.");
+        exit(1);
+    }
+}
+
+char** splitLine (char* line) {
+    
+    int numTokens = countTokens(line);
+
+    char** array = (char**) malloc((numTokens + 1) * (sizeof(char*)));
+    
+    fillStringArray(line, array, numTokens);
+    
+    return array;
+}
+
+int countTokens (char* line) {
+    
+    int count = 0;
+    
+    while (*line != '\0') {
+        
+        if (*line != ' ') {
+            
+            count++;
+            fastForewardThroughChars(&line);
+        }
+        
+        fastForewardThroughSpaces(&line);
+    }
+    
+    return count;
+}
+
+void fastForewardThroughChars (char** ptr) {
+    
+    for (; **ptr != '\0' && **ptr != ' '; (*ptr)++) {
+        ;
+    }
+    
+    return;
+}
+
+void fastForewardThroughSpaces (char** ptr) {
+    
+    for (; **ptr == ' '; (*ptr)++) {
+        ;
+    }
+    
+    return;
+}
+
+void fillStringArray (char* line, char** array, int size) {
+
+    for (int i = 0; i < size; i++, array++) {
+        
+        fastForewardThroughSpaces(&line);
+        
+        copyTokenIntoArray(&line, array);
+    }
+    
+    *array = NULL;
+    
+    return;
+}
+
+void copyTokenIntoArray (char** s1Ptr, char** s2Ptr) {
+    
+    int length = tokenLength(*s1Ptr);
+
+    *s2Ptr = (char*) malloc((length + 1) * sizeof(char));
+    
+    copyToken (*s1Ptr, s2Ptr);
+    
+    *(s1Ptr) += length;
+    
+    *(*s2Ptr + length) = '\0';
+    
+    return;
+}
+
+void copyToken (char* s1, char** s2Ptr) {
+    
+    for (int s2Offset = 0; *s1 != '\0' && *s1 != ' '; s1++, s2Offset++) {
+        
+        *(*s2Ptr + s2Offset) = *s1;
+    }
+    
+    return;
+}
+
+int tokenLength (char* string) {
+    
+    int count = 0;
+
+    for (; *(string + count) != ' ' && *(string + count) != '\0'; count++) {
+        ;
+    }
+
+    return count;
+}
+
+int stringMatch (char* string1, char* string2) {
+    
+    if (tokenLength(string1) != tokenLength(string2)) {
+        return 0;
+    }
+    
+    for (int offset = 0; *(string1 + offset) != '\0'; offset++) {
+        if (*(string1 + offset) != *(string2 + offset)) {
+            return 0;
+        }
+    }
+    
+    return 1;
+}
