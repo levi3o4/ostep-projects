@@ -1,0 +1,495 @@
+//TODO implement program execution (fork and exec)
+//TODO implement redirection (>, >>, < [dub 2, fopen modes], | [pipe]) and parallel mode (& [not waiting])
+//TODO start implementing the built-ins
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+//#include <sys/types.h>
+#include <sys/wait.h>
+#define PROMPT "myshell:~>"
+#define CD 0
+#define CLR 1
+#define DIR 2
+#define ENVIRON 3
+#define ECHO 4
+#define HELP 5
+#define PAUSE 6
+#define QUIT 7
+
+void printArray (char** array);
+int shell (FILE* stream);
+char** parseLine (FILE* stream);
+char** splitLine (char* line);
+int countTokens (char* line);
+void fastForewardThroughChars (char** ptr);
+void fastForewardThroughSpaces (char** ptr);
+void fillStringArray (char* line, char** array, int size);
+void copyTokenIntoArray (char** s1Ptr, char** s2Ptr);
+void copyToken (char* s1, char** s2Ptr);
+int tokenLength (char* string);
+int stringMatch (char* string1, char* string2);
+int interpret (char** argv);
+int idFunction (char* argName);
+void freeArgs (char** args);
+void launchProgram (char** argv);
+int deleteIfPresent (char** array, char* term);
+int search (char** array, char* term);
+void deleteAtIndex (char** array, int index);
+int arrayLength (char** array);
+//int continueCondition (FILE* stream, char** argv);
+
+int numBuiltIn = 8;
+char* builtIn[8] = {"cd",       //0
+                    "clr",      //1
+                    "dir",      //2
+                    "environ",  //3
+                    "echo",     //4
+                    "help",     //5
+                    "pause",    //6
+                    "quit"};
+                    
+//int numTokens; //be careful that forking doesn't mess this up
+
+int main(int argc, char* argv[]) {
+    
+    /*//PARSE TESTING
+    //FILE* stream = fopen("test.txt", "r");
+    FILE* stream = stdin;
+    
+    char** array = parseLine(stream);
+    
+    for (int offset = 0; *(array + offset) != NULL; offset++) {
+        printf("%s.\n", *(array + offset));
+    }
+    */
+    /*DELETEIFPRESENT TESTING (works with above)
+    deleteIfPresent(array, "hey");
+    
+    for (int offset = 0; *(array + offset) != NULL; offset++) {
+        printf("%s.\n", *(array + offset));
+    }
+    
+    deleteIfPresent(array, "do");
+    
+    for (int offset = 0; *(array + offset) != NULL; offset++) {
+        printf("%s.\n", *(array + offset));
+    }
+    */
+    /* //STRING MATCH TESTING
+    char* Help = "Help";
+    
+    printf("%d", stringMatch("Help", Help));
+    */
+    
+    
+    //ACTUAL main
+    
+    FILE* stream;
+    
+    if (argc == 1) {
+    
+        stream = stdin;
+    
+    } else {
+        
+        stream = fopen(argv[1], "r");
+        
+        if (stream == NULL) {
+            
+            printf("%s\n", "Error: batch file not found.");
+            exit(1);
+        }
+    }
+    
+    shell(stream);
+    
+    if (stream != stdin) {
+        fclose(stream);
+    }
+    
+    exit(0);
+}
+
+int shell (FILE* stream) {
+
+    while (!feof(stream)) {    
+        
+        if (stream == stdin) {
+            printf("%s", PROMPT);
+        }
+        
+        char** argv = parseLine(stream);
+        
+        /*
+        for (int offset = 0; *(argv + offset) != NULL; offset++) {
+            printf("%s.\n", *(argv + offset));
+        }
+        */
+        if (argv != NULL) {
+            
+            interpret(argv);
+            freeArgs(argv);
+        }
+    }
+}
+
+char** parseLine (FILE* stream) {
+
+    char* line = NULL;
+    size_t num = 0;
+    
+    if(getline(&line, &num, stream) == -1) {
+        
+        //fprintf(stderr, "Error: unable to read line from input stream.");
+        return NULL;
+        
+    } else {
+        return splitLine(line);    
+    }
+}
+
+char** splitLine (char* line) {
+    
+    int numTokens = countTokens(line);
+    
+    if (numTokens == 0) {
+        return NULL;
+    }
+    
+    char** array = (char**) malloc((numTokens + 1) * (sizeof(char*)));
+    
+    if (array == NULL) {
+        return array;
+    }
+    
+    fillStringArray(line, array, numTokens);
+    
+    return array;
+}
+
+int countTokens (char* line) {
+    
+    int count = 0;
+    
+    while (*line != '\0' && *line != '\n') {
+        
+        if (*line != ' ' && *line != '\t') {
+            
+            count++;
+            fastForewardThroughChars(&line);
+        }
+        
+        fastForewardThroughSpaces(&line);
+    }
+
+    return count;
+}
+
+void fastForewardThroughChars (char** ptr) {
+    
+    for (; **ptr != '\0' && **ptr != '\n' && **ptr != ' ' && **ptr != '\t'; (*ptr)++) {
+        ;
+    }
+    
+    return;
+}
+
+void fastForewardThroughSpaces (char** ptr) {
+    
+    for (; **ptr == ' ' || **ptr == '\t'; (*ptr)++) {
+        ;
+    }
+    
+    return;
+}
+
+void fillStringArray (char* line, char** array, int size) {
+
+    for (int i = 0; i < size; i++, array++) {
+        
+        fastForewardThroughSpaces(&line);
+        
+        copyTokenIntoArray(&line, array);
+    }
+    
+    *array = NULL;
+    
+    return;
+}
+
+void copyTokenIntoArray (char** s1Ptr, char** s2Ptr) {
+    
+    int length = tokenLength(*s1Ptr);
+
+    *s2Ptr = (char*) malloc((length + 1) * sizeof(char));
+    
+    copyToken (*s1Ptr, s2Ptr);
+    
+    fastForewardThroughChars(s1Ptr);
+    
+    return;
+}
+
+void copyToken (char* s1, char** s2Ptr) {
+    
+    int s2Offset = 0;
+    
+    for (; *s1 != '\0' && *s1 != '\n' && *s1 != ' ' && *s1 != '\t'; s1++, s2Offset++) {
+        
+        *(*s2Ptr + s2Offset) = *s1;
+    }
+    
+    *(*s2Ptr + s2Offset) = '\0';
+    
+    return;
+}
+
+int tokenLength (char* string) {
+
+    int count = 0;
+
+    for (; *(string + count) != ' ' && *(string + count) != '\t' 
+        && *(string + count) != '\0' && *(string + count) != '\n'; count++) {
+        ;
+    }
+
+    return count;
+}
+
+int stringMatch (char* string1, char* string2) {
+
+    if (tokenLength(string1) != tokenLength(string2)) {
+        return 0;
+    }
+    
+    for (int offset = 0; *(string1 + offset) != '\0'; offset++) {
+        if (*(string1 + offset) != *(string2 + offset)) {
+            return 0;
+        }
+    }
+    
+    return 1;
+}
+
+int interpret (char** argv) {
+
+    int num = idFunction(*argv);
+
+    switch (num) {
+        
+        case CD :
+            printf("%s\n","cd");
+            break;
+            
+        case CLR :
+            printf("%s\n","clr");
+            break;
+        
+        case DIR :
+            printf("%s\n","dir");
+            break;
+        
+        case ENVIRON :
+            printf("%s\n","environ");
+            break;
+        
+        case ECHO :
+            printf("%s\n","echo");
+            break;
+        
+        case HELP :
+            printf("%s\n","help");
+            break;
+        
+        case PAUSE :
+            printf("%s\n","pause");
+            break;
+        
+        case QUIT :
+            exit(0);
+            break;
+        
+        default :
+            launchProgram (argv);
+            break;
+    }
+
+    return num;
+}
+
+int idFunction (char* argName) {
+    
+    for (int i = 0; i < numBuiltIn; i++) {
+        
+        if (stringMatch(argName, *(builtIn + i))) {
+            return i;
+        }
+    }
+    
+    return numBuiltIn;
+}
+
+void freeArgs (char** args) {
+
+    for (int offset = 0; *(args + offset) != NULL; offset++) {
+        free(*(args + offset));
+    }
+    
+    free(args);
+    
+    return;
+}
+
+void launchProgram (char** argv) {
+    
+    //int pipePresent = search(argv, "|"); // maybe do these in if statements? DO THIS IN CHILD
+    //int ampersandPresent = search (argv, "&");
+    
+    /* 
+    Fork from here. In the parent, if (!ampersandPresent) {wait()} 
+    (maybe combine parent check and ampersand check) In child do a pipe check,
+    And if there's a pipe, create the pipe and do another fork.
+    Dpending on if first child or second child, 
+    Close pipe ends as necessary, use dup2, make necessary argv adjustments,
+    then redirectCheck() and exec in child 2, then child one.
+    
+    In the redirectCheck() function search for redirection symbols, the dup2 and adjust argv as necessary. 
+    */
+    
+    int ampersandIndex = deleteIfPresent(argv, "&");
+    
+    int pid;
+    
+    if ((pid = fork()) == -1) {
+        printf("%s\n", "Error: unable to fork.");
+        
+    } else if (pid == 0) {
+        
+        int execReturn;
+        
+        if ((execReturn = execvp(*argv, argv)) == -1) {
+            printf("%s\n", "Error: Program not found.");
+            exit(1);
+        }
+        
+    } else if (ampersandIndex == -1) {
+        waitpid(pid, NULL, 0);
+    }
+    
+    return;
+}
+
+int deleteIfPresent (char** array, char* term) {
+    
+    printArray (array);
+    
+    int index;
+    
+    if ((index = search (array, term)) != -1) {
+        
+        deleteAtIndex(array, index);
+    }
+    printArray (array);
+    
+    return index;
+}
+
+int search (char** array, char* term) {
+    
+    int offset = 0;
+    
+    for (; *(array + offset) != NULL; offset++) {
+        
+        if (stringMatch(*(array + offset), term)) {
+            return offset;
+        }
+    }
+    
+    return -1;
+}
+
+void deleteAtIndex (char** array, int index) {
+    
+    if (index >= arrayLength(array)) {
+        
+        printf("%s\n", "Error: could not delete from array due to index mismatch.");
+        exit(1);
+    }
+    
+    free(*(array + index));
+    
+    *(array + index) = NULL;
+    
+    for (; *(array + index + 1) != NULL; index++) {
+        *(array + index) = *(array + index + 1);
+    }
+    
+    *(array + index) = NULL;
+    
+    return;
+}
+
+int arrayLength (char** array) {
+    
+    int count = 0;
+    
+    for (; *(array + count) != NULL; count++) {
+        ;
+    }
+    
+    return count;
+}
+
+void printArray (char** array) {
+    
+    puts("ARRAY:");
+    
+    for (int offset = 0; *(array + offset) != NULL; offset++) {
+        printf("%s.\n", *(array + offset));
+    }
+    
+    return;
+}
+
+/*
+int continueCondition (FILE* stream, char** argv) {
+    
+    if (stream == stdin) {
+        
+        if (argv == NULL) {
+            return 1;
+            
+        } else if (stringMatch(*argv, "quit")) {
+            return 0;
+        
+        } else {
+            return 1;
+        }
+        
+    } else if (!feof(stream)) {
+        
+        return 1;
+        
+    } else {
+        
+        return 0;
+    }
+}
+*/
+// Testing for beginning ampersand
+/*    
+    char* progName = *argv;
+    
+    if (**argv == '&') {
+        
+        if (stringMatch(*argv, "&")) {
+            
+            progName = *(argv + 1);
+        
+        } else {
+            
+            progName = **(argv + 1);
+        }
+    }
+*/
