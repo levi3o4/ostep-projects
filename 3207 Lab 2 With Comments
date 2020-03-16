@@ -1,0 +1,872 @@
+
+/* 
+ * Course: 3207
+ * Coder: Eugene Levitsky
+ * Assignemnt: Lab 1 - Shell
+ * A rudimentary implementation of a shell, 
+ * complete with a selection of built-in commands,
+ * fork-and-exec program execution,
+ * pausing, and redirection.
+ */
+ 
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <dirent.h>
+#define PROMPT "myshell:~>"
+#define CD 0        //codes for interpret()
+#define CLR 1
+#define DIREC 2
+#define ENVIRON 3
+#define ECHO 4
+#define HELP 5
+#define PAUSE 6
+#define QUIT 7
+#define READ 0      //pipe codes
+#define WRITE 1
+
+void printArray (char** array);
+void printArrayAsLine (char** array, FILE* stream);
+int shell (FILE* stream);
+char** parseCommand (FILE* stream);
+char** splitLine (char* line);
+int countTokens (char* line);
+void fastForewardThroughChars (char** ptr);
+void fastForewardThroughSpaces (char** ptr);
+void fillStringArray (char* line, char** array, int size);
+void copyTokenIntoArray (char** s1Ptr, char** s2Ptr);
+void copyToken (char* s1, char** s2Ptr);
+void transcribeToken (char* s1, char** s2Ptr);
+int tokenLength (char* string);
+int stringMatch (char* string1, char* string2);
+int interpret (char** argv);
+int idFunction (char* argName);
+void cd (char** argv);
+void clr ();
+void dir (char** argv);
+void environ (char** argv);
+void singleEnviron (char* environVar, FILE* stream);
+void echo (char** argv);
+void help (char** argv);
+void Pause ();
+void freeArgs (char** args);
+void freeIndividualArgs (char** args);
+void launchProgram (char** argv);
+int deleteIfPresent (char** array, char* term);
+int search (char** array, char* term);
+void deleteAtIndex (char** array, int index);
+int arrayLength (char** array);
+void handleRedirections (char** argv);
+char* checkForRedirection (char** argv, char* symbol);
+void handleBuiltInRedirections (char** argv, FILE** file);
+
+//Array of built-in command names.
+char* builtIn[9] = {"cd",       //0
+                    "clr",      //1
+                    "dir",      //2
+                    "environ",  //3
+                    "echo",     //4
+                    "help",     //5
+                    "pause",    //6
+                    "quit",     //7
+                    NULL};
+
+//Checks number of parameters;
+//if there is one parameter, runs shell in user mode;
+//if two, runs shell in batch mode;
+//else, prints an error message and exits.
+int main(int argc, char* argv[]) {
+   
+    /*
+    //PARSE TESTING
+    //FILE* stream = fopen("test.txt", "r");
+    FILE* stream = stdin;
+    
+    char** array = parseCommand(stream);
+    
+    printArray(array);
+    */
+    /*DELETEIFPRESENT TESTING (works with above)
+    deleteIfPresent(array, "hey");
+    
+    printArray(array);
+    
+    deleteIfPresent(array, "do");
+    
+    printArray();
+    */
+    /* //STRING MATCH TESTING
+    char* Help = "Help";
+    
+    printf("%d", stringMatch("Help", Help));
+    */
+    
+    
+    //ACTUAL main
+    
+    FILE* stream;
+    
+    if (argc == 1) {
+        
+        stream = stdin;
+        
+    } else if (argc == 2) {
+        
+        if ((stream = fopen(argv[1], "r")) == NULL) {
+            
+            printf("%s\n", "Error: batch file not found.");
+            exit(1);
+        }
+        
+    } else {
+        
+        printf("%s\n", "Error: too many parameters.");
+        exit(1);
+    }
+    
+    shell(stream);
+    
+    /*
+    if (stream != stdin) {
+        fclose(stream);
+    }
+    */
+    
+    exit(0);
+}
+
+//The shell itself.
+//In a loop, reads in a command from user or input file
+//and interprets, until either "quit" command is received
+//or input file reaches EOF.
+int shell (FILE* stream) {
+
+    int commandNum = -1;
+
+    while (!feof(stream) && commandNum != QUIT) {    
+        
+        if (stream == stdin) {
+            printf("%s", PROMPT);
+        }
+        
+        char** argv = parseCommand(stream);
+        
+        if (argv != NULL) {
+            
+            commandNum = interpret(argv);
+            freeArgs(argv);
+        }
+    }
+}
+
+//Reads in one command from input and
+//returns the command as an array of char*.
+char** parseCommand (FILE* stream) {
+
+    char* line = NULL;
+    size_t num = 0;
+    
+    if(getline(&line, &num, stream) == -1) {
+        
+        fprintf(stderr, "Error: unable to read line from input stream.");
+        return NULL;
+
+    } else {
+        return splitLine(line);    
+    }
+}
+
+//Receives a line of text and returns
+//an array the line's component tokens.
+char** splitLine (char* line) {
+    
+    int numTokens = countTokens(line);
+    
+    if (numTokens == 0) {
+        return NULL;
+    }
+    
+    char** array = (char**) malloc((numTokens + 1) * (sizeof(char*)));
+    
+    if (array == NULL) {
+        return array;
+    }
+    
+    fillStringArray(line, array, numTokens);
+    
+    return array;
+}
+
+//Returns the number of tokens in a given line of text.
+int countTokens (char* line) {
+    
+    int count = 0;
+    
+    while (*line != '\0' && *line != '\n') {
+        
+        if (*line != ' ' && *line != '\t') {
+            
+            count++;
+            fastForewardThroughChars(&line);
+        }
+        
+        fastForewardThroughSpaces(&line);
+    }
+
+    return count;
+}
+
+//Moves a char* through a char array until a "blank" character is reached.
+void fastForewardThroughChars (char** ptr) {
+    
+    for (; **ptr != '\0' && **ptr != '\n' && **ptr != ' ' && **ptr != '\t'; (*ptr)++) {
+        ;
+    }
+    
+    return;
+}
+
+//Moves a char* through a char array until a "non-blank" character is reached.
+void fastForewardThroughSpaces (char** ptr) {
+    
+    for (; **ptr == ' ' || **ptr == '\t'; (*ptr)++) {
+        ;
+    }
+    
+    return;
+}
+
+//Fills a char* array with the component tokens of a given line of text.
+void fillStringArray (char* line, char** array, int size) {
+
+    for (int i = 0; i < size; i++, array++) {
+        
+        fastForewardThroughSpaces(&line);
+        
+        copyTokenIntoArray(&line, array);
+    }
+    
+    *array = NULL;
+    
+    return;
+}
+
+//Copies a given token into a given element of a char* array.
+void copyTokenIntoArray (char** s1Ptr, char** s2Ptr) {
+    
+    copyToken (*s1Ptr, s2Ptr);
+    
+    fastForewardThroughChars(s1Ptr);
+    
+    return;
+}
+
+//Uses malloc to create a new char array, copies a given token into it, 
+//and attaches its associated pointer to a given index of a char* array.
+void copyToken (char* s1, char** s2Ptr) {
+    
+    int length = tokenLength(s1);
+
+    *s2Ptr = (char*) malloc((length + 1) * sizeof(char));
+    
+    transcribeToken (s1, s2Ptr);
+}
+
+//Copies a given token into a given char*.
+void transcribeToken (char* s1, char** s2Ptr) {
+    
+    int s2Offset = 0;
+    
+    for (; *s1 != '\0' && *s1 != '\n' && *s1 != ' ' && *s1 != '\t'; s1++, s2Offset++) {
+        
+        *(*s2Ptr + s2Offset) = *s1;
+    }
+    
+    *(*s2Ptr + s2Offset) = '\0';
+    
+    return;
+}
+
+//Returns the length of a given token.
+int tokenLength (char* string) {
+
+    int count = 0;
+
+    for (; *(string + count) != ' ' && *(string + count) != '\t' 
+        && *(string + count) != '\0' && *(string + count) != '\n'; count++) {
+        ;
+    }
+
+    return count;
+}
+
+//Returns 1 if two strings are identical,
+//else returns 0.
+int stringMatch (char* string1, char* string2) {
+
+    if (tokenLength(string1) != tokenLength(string2)) {
+        return 0;
+    }
+    
+    for (int offset = 0; *(string1 + offset) != '\0'; offset++) {
+        if (*(string1 + offset) != *(string2 + offset)) {
+            return 0;
+        }
+    }
+    
+    return 1;
+}
+
+//Interprets a pre-tokenized line of shell input;
+//if input invokes a built-in command, calls said command;
+//else, assumes input pertains to an external program
+//and calls the program launcher.
+int interpret (char** argv) {
+
+    int num = idFunction(*argv);
+
+    switch (num) {
+        
+        case CD :
+            cd(argv);
+            break;
+            
+        case CLR :
+            clr();
+            break;
+        
+        case DIREC :
+            dir(argv);
+            break;
+        
+        case ENVIRON :
+            environ(argv);
+            break;
+        
+        case ECHO :
+            echo(argv);
+            break;
+        
+        case HELP :
+            help(argv);
+            break;
+        
+        case PAUSE :
+            Pause();
+            break;
+        
+        case QUIT :
+            break;
+        
+        default :
+            launchProgram (argv);
+            break;
+    }
+
+    return num;
+}
+
+//Interprets the first token of a given command;
+//if command is built-in, returns its associated index in global builtIn array;
+//else, returns the builtIn's size. 
+int idFunction (char* argName) {
+
+    int offset;
+    
+    for (offset = 0; *(builtIn + offset) != NULL && !stringMatch(argName, *(builtIn + offset)); offset++) {
+        ;
+    }
+
+    return offset;
+}
+
+//Built-in: changes current directory to given directory, 
+//if such a directory can be found.
+void cd (char** argv) {
+    
+    if (chdir(*(++argv))) {
+        printf("%s\n", "Error: Could not open directory.");
+    }
+    
+    return;    
+}
+
+//Built-in: clears console screen.
+void clr () {
+
+    printf("%s", "\033[H\033[2J");
+    
+    return;
+}
+
+//Built-in: lists the contents of a given directory, 
+//if such a directory can be found.
+void dir (char** argv) {
+    
+    FILE* stream;
+    
+    handleBuiltInRedirections(argv, &stream);
+    
+    if (stream == NULL) {
+        stream = stdout;
+    }
+    
+    if (*(argv + 1) == NULL) {
+        fprintf(stream, "%s\n", "No directory name given. Please try again.");
+        return;
+    }
+    
+    DIR* dir;
+
+    struct dirent *s;
+    
+    char *directory = *(++argv);
+    
+    if ((dir = opendir(directory)) == NULL) {
+    
+        fprintf(stream, "%s\n", "Error: could not open directory.");
+        
+    } else {
+    
+        while((s = readdir(dir)) != NULL) {
+           //While there is another item in the directory that has not been looked at yet
+        
+          fprintf(stream, "%s\t", s->d_name);
+        }
+    
+        fprintf(stream, "%s\n", "");
+    }
+    
+    if (stream != stdout) {
+        fclose(stream);
+    }
+    
+    return;
+}
+
+//Built-in: lists environment variables.
+void environ (char** argv) {
+
+    char* environVar[] = {"LANG","USER", "LOGNAME", "HOME", "PATH", "MAIL", 
+                           "SHELL", "SSH_CLIENT", "SSH_CONNECTION", "SSH_TTY", 
+                           "TERM", "XDG_SESSION_ID", "XDG_RUNTIME_DIR", "HOSTTYPE", 
+                           "VENDOR", "OSTYPE", "MACHTYPE", "SHLVL", "PWD", "GROUP", 
+                           "HOST", "REMOTEHOST", "MANPATH", "WWW_HOME", NULL};
+    
+    FILE* stream;
+    
+    handleBuiltInRedirections(argv, &stream);
+    
+    if (stream == NULL) {
+        stream = stdout;
+    }
+    
+    for (int offset = 0; *(environVar + offset) != NULL; offset++) {
+        singleEnviron(*(environVar + offset), stream);
+    }
+    
+    if (stream != stdout) {
+        fclose(stream);
+    }
+    
+}
+
+//Prints a given environment variable.
+void singleEnviron (char* environVar, FILE* stream) {
+    
+    fprintf(stream, "%s=%s\n", environVar, getenv(environVar));
+    
+    return;
+}
+
+//Built-in: prints the component tokens of a command,
+//omitting initital command ("echo"), as well as any 
+//redirection symbols and redirection output file names.
+void echo (char** argv) {
+    
+    FILE* stream;
+    
+    handleBuiltInRedirections(argv, &stream);
+    
+    if (stream == NULL) {
+        stream = stdout;
+    }
+    
+    printArrayAsLine(++argv, stream);
+    
+    if (stream != stdout) {
+        fclose(stream);
+    }
+    
+    return;
+}
+
+//Built-in: Prints shell's help page, read in from a README file
+//(as per discussion with Shakeel)
+void help (char** argv) {
+    
+    FILE* stream;
+    
+    handleBuiltInRedirections(argv, &stream);
+    
+    if (stream == NULL) {
+        stream = stdout;
+    }
+    
+    FILE* helpFile;
+    
+    if ((helpFile = fopen("README.txt", "r")) == NULL) {
+            
+            printf("%s\n", "Error: could not open help file (README.txt).");
+            exit(1);
+        }
+    
+    char* line = NULL;
+    size_t num = 0;
+    
+    while (getline(&line, &num, helpFile) != -1) {
+        
+        fprintf(stream, "%s", line);
+    } 
+    
+    /*
+    fprintf(stream, "%s\n", "This is a placeholder help message;");
+    fprintf(stream, "%s\n", "The plan is to figure out the text later,");
+    fprintf(stream, "%s\n", "And test the tech right now.");
+    */
+    if (stream != stdout) {
+        fclose(stream);
+    }
+}
+
+//Built-in: pauses shell until user presses enter key.
+void Pause () {
+    
+    char* line = NULL;
+    size_t num = 0;
+    
+    getline(&line, &num, stdin);
+    free(line);
+    
+    //printf("%c", 127);
+   
+    return;
+}
+
+//Frees a given args array (element by element, then the array itself).
+void freeArgs (char** args) {
+
+    freeIndividualArgs(args);
+    
+    free(args);
+    
+    return;
+}
+
+//Freed the individual char* elements of a given args array.
+void freeIndividualArgs (char** args) {
+    
+    for (int offset = 0; *(args + offset) != NULL; offset++) {
+        free(*(args + offset));
+    }
+    
+    return;
+}
+
+//Launches external program
+void launchProgram (char** argv) {
+    
+    int ampersandIndex = deleteIfPresent(argv, "&");    //Checks and adjusts for background execution command
+    
+    int verbarIndex; 
+    
+    if ((verbarIndex = search(argv, "|")) != -1) {      //Checks and adjusts for pipe command:
+                                                        //replaces pipe symbol with NULL,
+                                                        //so first half of args array behaves as through
+                                                        //it is the entire args array.
+        *(argv + verbarIndex) = NULL;
+    }
+    
+    int pid;
+    
+    if ((pid = fork()) == -1) {
+        printf("%s\n", "Error: unable to fork.");
+        
+    } else if (pid == 0) {  //Child branch;
+        
+        if (verbarIndex != -1) {    //if piping is involved,
+            
+            int fd[2];              //sets up pipe,
+            
+            pipe(fd);
+            
+            int pid2;
+            
+            if ((pid2 = fork()) == -1) {    //then forks again.
+                printf("%s\n", "Error: unable to fork.");
+                
+            } else if (pid2 == 0) {         //if child in second fork, 
+                
+                close(fd[READ]);            //sets up redirection,
+                
+                dup2(fd[WRITE], STDOUT_FILENO);
+                
+                int execPipeReturn; 
+                    
+                                            //then executes first (giving) half of the command.
+                if ((execPipeReturn = execvp(*argv, argv)) == -1) {
+                        
+                    printf("%s\n", "Error: Program not found.");
+                    exit(1);
+                }
+                
+            } else {    //if child of first fork but parent of second fork,
+                
+                waitpid(-1, NULL, 0);
+                
+                argv += (verbarIndex + 1);  //moves args pointer to second (receiving) half of command,
+                                            //(now, second half of args array gets to behave as though
+                                            //it is the entire args array.)
+                
+                close(fd[WRITE]);           //sets up redirection.
+                
+                dup2(fd[READ], STDIN_FILENO);
+            }
+            
+        } else {    //no piping; handles other redirection options.
+            handleRedirections(argv);
+        }
+        
+        int execReturn;
+                                //still in the primary fork's child branch; executes given args
+                                //(piping agnostic).
+        if ((execReturn = execvp(*argv, argv)) == -1) {
+            printf("%s\n", "Error: Program not found.");
+            exit(1);
+        }
+        
+    } else {    //Parent branch;
+        
+        if (ampersandIndex == -1) {     //background execution
+            waitpid(-1, NULL, 0);
+        }
+        
+        if (verbarIndex != -1) {    //frees args from second half of command;
+                                    //because pipe symbol is replaced with NULL,
+                                    //the eventually-invoked freeArgs()
+                                    //would not be able to reach these.
+            freeIndividualArgs(argv + verbarIndex + 1);
+        }
+    
+        return;
+    }
+}
+
+//If given token can be found in the given char* array,
+//token is deleted, and all subsequent elements of array
+//are shifted to the left so as to plug the hole.
+//Returns index of token, or -1 if token not found.
+int deleteIfPresent (char** array, char* term) {
+    
+    int index;
+    
+    if ((index = search(array, term)) != -1) {
+        
+        deleteAtIndex(array, index);
+    }
+
+    return index;
+}
+
+//Returns index of first appearance of a given token
+//in a given char* array, or -1 if token not found.
+int search (char** array, char* term) {
+    
+    int offset = 0;
+    
+    for (; *(array + offset) != NULL; offset++) {
+        
+        if (stringMatch(*(array + offset), term)) {
+            return offset;
+        }
+    }
+
+    return -1;
+}
+
+//Deletes token at given index of a given char* array,
+//and shifts all subsequent elements over to plug the hole.
+void deleteAtIndex (char** array, int index) {
+    
+    if (index >= arrayLength(array)) {
+        
+        printf("%s\n", "Error: could not delete from array due to index mismatch.");
+        exit(1);
+    }
+    
+    free(*(array + index));
+    
+    *(array + index) = NULL;
+    
+    for (; *(array + index + 1) != NULL; index++) {
+        *(array + index) = *(array + index + 1);
+    }
+    
+    *(array + index) = NULL;
+    
+    return;
+}
+
+//Returns the index of the first NULL in a given char* array.
+int arrayLength (char** array) {
+    
+    int count = 0;
+    
+    for (; *(array + count) != NULL; count++) {
+        ;
+    }
+    
+    return count;
+}
+
+//Prints elements of char* array, one per line, 
+//with a period after each (for testing purposes).
+void printArray (char** array) {
+    
+    puts("ARRAY:");
+    
+    for (int offset = 0; *(array + offset) != NULL; offset++) {
+        printf("%s.\n", *(array + offset));
+    }
+    
+    return;
+}
+
+//Prints the individual elements of a
+//char* array as a single line of text.
+void printArrayAsLine (char** array, FILE* stream) {
+
+    for (int offset = 0; *(array + offset) != NULL; offset++) {
+        fprintf(stream, "%s ", *(array + offset));
+    }
+    
+    fprintf(stream, "%s\n","");
+    
+    return;
+}
+
+//Redirection handler for external commands;
+//checks for redirection symbols, then opens
+//files and dups file descriptors as appropriate.
+void handleRedirections (char** argv) {
+    
+    int output = -1;
+    int input = -1;
+    
+    char* write = checkForRedirection(argv, ">");
+    char* append = checkForRedirection(argv, ">>");
+    char* read = checkForRedirection(argv, "<");
+    
+    if (write != NULL) {
+        
+        if ((output = open(write, O_WRONLY | O_CREAT | O_TRUNC, 0777)) != -1) {
+        
+            dup2(output, STDOUT_FILENO);
+        
+        } else {
+            printf("%s\n", "Error: could not open output file.");
+        }
+        
+        free(write);
+    }
+    
+    if (append != NULL) {
+        
+        if ((output = open(append, O_WRONLY | O_CREAT | O_APPEND, 0777)) != -1) {
+        
+            dup2(output, STDOUT_FILENO);
+        
+        } else {
+            printf("%s\n", "Error: could not open output file.");
+        }
+        
+        free(append);
+    }
+    
+    if (read != NULL) {
+        
+        if ((input = open(read, O_RDONLY, 0777)) != -1) {
+        
+            dup2(input, STDIN_FILENO);
+        
+        } else {
+            printf("%s\n", "Error: could not open input file.");
+        }
+        
+        free(read);
+    }
+    
+    return;
+}
+
+//Checks for redirection symbol;
+//Deletes symbol, copies and deletes
+//redirection file name, returns file name.
+//Hole cause by deletions is immediately plugged.
+char* checkForRedirection (char** argv, char* symbol) {
+    
+    int offset;
+    
+    char* fileName = NULL;
+    
+    if ((offset = deleteIfPresent(argv, symbol)) != -1) {
+        
+        copyToken(*(argv + offset), &fileName);
+        
+        deleteAtIndex(argv, offset);
+    }
+    
+    return fileName;
+}
+
+//Redirection handler for built-in commands;
+//checks for redirection symbols, then opens files
+//and assigns them to the given FILE* as appropriate
+void handleBuiltInRedirections (char** argv, FILE** filePtr) {
+    
+    *filePtr = NULL;
+    
+    char* write = checkForRedirection(argv, ">");
+    char* append = checkForRedirection(argv, ">>");
+    
+    if (write != NULL) {
+        
+        if ((*filePtr = fopen(write, "w")) != NULL) {
+
+            return;
+        
+        } else {
+            printf("%s\n", "Error: could not open output file.");
+        }
+        
+        free(write);
+    }
+    
+    if (append != NULL) {
+        
+        if ((*filePtr = fopen(append, "a")) != NULL) {
+        
+            return;
+        
+        } else {
+            printf("%s\n", "Error: could not open output file.");
+        }
+        
+        free(append);
+    }
+    
+    return;
+}
