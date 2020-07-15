@@ -1,0 +1,122 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
+#define THREAD_NUM 2
+#define LOOPS 100000
+#define MAX_ITEMS 10
+
+int sum = 0;
+int max = 0;
+int min = 0;
+pthread_mutex_t mutex;
+pthread_cond_t space_available;
+pthread_cond_t item_available;
+
+void *produce (void* vargp);
+void *consume (void* vargp);
+void max_check ();
+void min_check ();
+
+int main()
+{
+    pthread_mutex_init(&mutex, NULL);
+    pthread_cond_init(&space_available, NULL);
+    pthread_cond_init(&item_available, NULL);
+    
+    pthread_t tid_p[THREAD_NUM];
+    pthread_t tid_c[THREAD_NUM];    
+    
+    
+    for (int i = 0; i < THREAD_NUM; i++) {
+        int* num = malloc(sizeof(int));
+        *num = i;
+        pthread_create(&tid_p[i], NULL, produce, num);
+    }
+    
+    for (int i = 0; i < THREAD_NUM; i++) {
+        int* num = malloc(sizeof(int));
+        *num = i;
+        pthread_create(&tid_c[i], NULL, consume, num);
+    }
+    
+    //pthread_create(&tid_p, NULL, produce, NULL);
+    //pthread_create(&tid_c, NULL, consume, NULL);
+    
+    
+    for (int i = 0; i < THREAD_NUM; i++) {
+        pthread_join(tid_p[i], NULL);
+    }
+    
+    for (int i = 0; i < THREAD_NUM; i++) {
+        pthread_join(tid_c[i], NULL);
+    }
+    
+    //pthread_join(tid_p, NULL);
+    //pthread_join(tid_c, NULL);
+    
+    printf("Hello World\n");
+    printf("sum: %d\n", sum);
+    printf("max: %d\n", max);
+    printf("min: %d\n", min);
+
+    return 0;
+}
+
+void *produce (void* vargp) {
+    
+    for (int i = 0; i < LOOPS; i++) {
+        pthread_mutex_lock(&mutex);
+        
+        while (sum >= MAX_ITEMS) {
+            pthread_cond_wait(&space_available, &mutex);
+        }
+        sum++;
+        max_check();
+        
+        pthread_cond_signal(&item_available);
+        pthread_mutex_unlock(&mutex);
+    }
+    
+    int num = *(int*) vargp;
+    printf("This comes from producer %d!\n", num);
+    free(vargp);
+    
+}
+
+void *consume (void* vargp) {
+    
+    for (int i = 0; i < LOOPS; i++) {
+        pthread_mutex_lock(&mutex);
+        
+        while (sum <= 0) {
+            pthread_cond_wait(&item_available, &mutex);
+        }
+        sum--;
+        min_check();
+        
+        pthread_cond_signal(&space_available);
+        pthread_mutex_unlock(&mutex);
+    }
+    
+    int num = *(int*) vargp;
+    printf("This comes from consumer %d!\n", num);
+    free(vargp);
+    
+}
+
+void max_check () {
+    
+    if (sum > max) {
+        max = sum;
+    }
+    
+}
+
+void min_check () {
+
+    if (sum < min) {
+        min = sum;
+    }
+
+}
+
